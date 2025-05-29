@@ -16,8 +16,8 @@ st.markdown(
 )
 
 # Configure Gemini
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
+google_key = st.secrets["GOOGLE_API_KEY"]
+genai.configure(api_key=google_key)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 uploaded_file = st.file_uploader("Upload your resume (PDF or TXT)", type=["pdf", "txt"])
