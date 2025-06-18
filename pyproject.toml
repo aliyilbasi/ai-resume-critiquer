@@ -1,5 +1,8 @@
 [project]
-name = "project2"
+name = "ai-resume-critiquer"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
