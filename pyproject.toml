@@ -17,6 +17,5 @@ dependencies = [
     "Pillow>=10.1.0",
     "plotly>=5.18.0",
     "PyPDF2>=3.0.1"
-    "plotly.graph_objects"
-
 ]
+
