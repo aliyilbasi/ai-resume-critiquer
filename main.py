@@ -5,120 +5,158 @@ from dotenv import load_dotenv
 import io
 import json
 import re
+import plotly.graph_objects as go
 
-# Load environment variables for local development
+# --- Page & API Configuration ---
 load_dotenv()
-
-# --- Page Configuration ---
 st.set_page_config(page_title="AI Resume Optimizer", page_icon="🚀", layout="wide")
 
-# --- API Key Configuration ---
 try:
-    # Use st.secrets for deployment
     google_key = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=google_key)
 except (KeyError, AttributeError):
     st.error("🔴 Google API Key not found. Please set it in your Streamlit secrets.")
     st.stop()
 
-# Initialize the Generative Model
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- Helper Functions for Text Extraction ---
+# --- VISUAL HELPER FUNCTIONS ---
+
+def display_score_bar(score, title):
+    """Displays a score as a styled progress bar in the sidebar."""
+    st.sidebar.markdown(f"##### {title}")
+    
+    # Color coding the progress bar
+    if score >= 8:
+        color = "#28a745" # Green
+    elif score >= 5:
+        color = "#ffc107" # Yellow
+    else:
+        color = "#dc3545" # Red
+    
+    # Custom HTML/CSS for a better-looking progress bar
+    st.sidebar.markdown(
+        f"""
+        <div style="background-color: #eee; border-radius: 5px; height: 25px; width: 100%;">
+            <div style="background-color: {color}; width: {score * 10}%; height: 100%; border-radius: 5px; text-align: center; color: white; font-weight: bold; line-height: 25px;">
+                {score}/10
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.sidebar.write("") # Add some space
+
+def create_skill_gap_chart(resume_skills, job_skills):
+    """Creates a Plotly bar chart showing matched and missing skills."""
+    resume_set = set(s.lower().strip() for s in resume_skills)
+    job_set = set(s.lower().strip() for s in job_skills)
+    
+    matched_skills = list(resume_set.intersection(job_set))
+    missing_skills = list(job_set.difference(resume_set))
+    
+    if not matched_skills and not missing_skills:
+        st.info("No specific skills were extracted for comparison. This can happen with very short job descriptions.")
+        return None
+
+    # Data for the chart
+    y_labels = matched_skills + missing_skills
+    x_values = [1] * len(matched_skills) + [-1] * len(missing_skills)
+    colors = ['#28a745'] * len(matched_skills) + ['#dc3545'] * len(missing_skills)
+    texts = ["Present"] * len(matched_skills) + ["Missing"] * len(missing_skills)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=y_labels,
+        x=x_values,
+        orientation='h',
+        marker_color=colors,
+        text=texts,
+        hoverinfo='y',
+        textposition="none"
+    ))
+
+    fig.update_layout(
+        title='<b>Resume vs. Job Description Skill Gap</b>',
+        xaxis=dict(
+            tickvals=[-1, 1],
+            ticktext=['<b>MISSING FROM RESUME</b>', '<b>PRESENT IN RESUME</b>'],
+            title_text=""
+        ),
+        yaxis=dict(autorange="reversed"), # Puts matched skills on top
+        height=200 + len(y_labels) * 25, # Dynamic height
+        margin=dict(l=150) # Add left margin for long skill names
+    )
+    return fig
+
+
+# --- TEXT EXTRACTION (Unchanged) ---
 def extract_text_from_pdf(file_bytes):
-    """Extracts text from a PDF file."""
     try:
         pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-        text = ""
-        for page in pdf_reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text
+        return "".join(page.extract_text() for page in pdf_reader.pages if page.extract_text())
     except Exception as e:
-        st.error(f"Error reading PDF file: {e}")
+        st.error(f"Error reading PDF: {e}")
         return None
 
 def extract_text_from_file(uploaded_file):
-    """Extracts text from the uploaded file (PDF or TXT)."""
     file_bytes = uploaded_file.read()
     if uploaded_file.type == "application/pdf":
         return extract_text_from_pdf(file_bytes)
-    elif uploaded_file.type == "text/plain":
-        return file_bytes.decode("utf-8")
-    return ""
+    return file_bytes.decode("utf-8")
 
-# --- UI Elements ---
-st.title("🚀 AI Resume Optimizer")
-st.markdown(
-    "Get a comprehensive evaluation of your resume. For the best results, provide the job description you're targeting."
-)
-
+# --- UI ELEMENTS ---
+st.title("🚀 AI Resume Dashboard")
+st.markdown("Upload your resume and a job description to get a visual, in-depth analysis of your fit.")
 st.divider()
 
 # --- Input Columns ---
 col1, col2 = st.columns(2)
-
 with col1:
     st.subheader("Your Resume")
-    uploaded_file = st.file_uploader(
-        "Upload your resume (PDF or TXT)", type=["pdf", "txt"], label_visibility="collapsed"
-    )
-
+    uploaded_file = st.file_uploader("Upload (PDF or TXT)", type=["pdf", "txt"], label_visibility="collapsed")
 with col2:
     st.subheader("Job Description")
-    job_desc = st.text_area(
-        "Paste the job description here",
-        height=250,
-        placeholder="Pasting the job description allows for a much more accurate analysis...",
-        label_visibility="collapsed"
-    )
+    job_desc = st.text_area("Paste here", height=250, placeholder="For the best results, provide the job description...", label_visibility="collapsed")
 
-analyze_button = st.button("✨ Analyze and Evaluate", type="primary", use_container_width=True)
+analyze_button = st.button("✨ Generate My Dashboard", type="primary", use_container_width=True)
 
-# --- Main Logic ---
+# --- MAIN LOGIC ---
 if analyze_button:
     if uploaded_file is None:
         st.warning("⚠️ Please upload your resume first.")
     else:
-        with st.spinner("Our AI is performing a deep-dive analysis... This may take a moment."):
+        with st.spinner("Our AI is building your dashboard... This may take a moment."):
             try:
                 resume_text = extract_text_from_file(uploaded_file)
                 if not resume_text or not resume_text.strip():
-                    st.error("Could not extract text from the file. It might be empty, corrupted, or an image-based PDF.")
+                    st.error("Could not extract text from the file. It might be empty or an image-based PDF.")
                 else:
-                    # --- The New, Powerful Prompt ---
+                    # --- THE NEW, VISUAL-FOCUSED PROMPT ---
                     prompt = f"""
-                    You are an expert career coach and professional resume reviewer for a top tech company.
-                    Your task is to provide a comprehensive evaluation of a resume.
+                    You are an expert career coach AI. Your task is to provide a comprehensive evaluation of a resume against a job description.
 
-                    **Context:**
-                    - The candidate's resume is provided below.
-                    - The target job description is also provided (if available). Your primary goal is to assess the resume's suitability for this specific role. If no job description is provided, perform a general analysis for a professional role.
+                    Your response MUST be a single JSON object enclosed in triple backticks. Do not include any text before or after the JSON block.
+                    The JSON object must have three top-level keys: "scores", "skill_analysis", and "qualitative_feedback".
 
-                    **Instructions for your output:**
-                    Your response MUST be structured in two parts:
-                    
-                    PART 1: A JSON object containing your quantitative scores. This JSON object must be enclosed in triple backticks (```json ... ```). Do not include any text before this JSON block.
-                    The JSON object must have the following keys with integer values from 1 to 10:
-                    - "Clarity_and_Formatting": How readable, clean, and professional the resume is.
-                    - "Impact_and_Achievements": How well the resume uses quantifiable results and action verbs to show impact.
-                    - "ATS_Friendliness": How well the resume is optimized for Applicant Tracking Systems (e.g., standard format, keywords).
-                    - "Job_Fit": How well the resume content (skills, experience) aligns with the provided job description. Score 5 if no job description is provided.
+                    1. "scores": An object with integer scores (1-10) for these keys:
+                       - "Clarity_and_Formatting"
+                       - "Impact_and_Achievements"
+                       - "ATS_Friendliness"
+                       - "Job_Fit" (Score 5 if no job description)
 
-                    PART 2: A detailed qualitative analysis in Markdown format. This part should come AFTER the JSON block. Use the following exact headings:
-                    ### ✅ Key Strengths
-                    (List 2-3 specific things the resume does well.)
-                    
-                    ### 💡 Areas for Improvement
-                    (Provide a detailed, actionable list of the most important changes. Focus on rephrasing bullet points, adding metrics, and tailoring content.)
-                    
-                    ### 🤖 ATS & Keyword Optimization
-                    (Give advice on how to improve the resume for Applicant Tracking Systems. Suggest specific keywords from the job description that are missing from the resume.)
+                    2. "skill_analysis": An object with two keys:
+                       - "resume_keywords": A list of the top 10-15 most important technical skills, tools, and soft skills found in the resume.
+                       - "job_description_keywords": A list of the top 10-15 most important required skills, tools, and qualifications from the job description. If no job description, return an empty list.
+
+                    3. "qualitative_feedback": An object with string values for these keys:
+                       - "strengths": A markdown-formatted string listing 2-3 key strengths of the resume.
+                       - "improvements": A detailed, markdown-formatted string with the most important areas for improvement.
+                       - "ats_optimization": A markdown-formatted string with advice on ATS optimization and missing keywords.
 
                     ---
                     **Job Description:**
-                    {job_desc if job_desc else "Not provided. Please perform a general analysis."}
+                    {job_desc if job_desc else "Not provided."}
                     ---
                     **Resume Content:**
                     {resume_text}
@@ -129,63 +167,49 @@ if analyze_button:
                     response_text = response.text.strip()
                     
                     # --- Parsing the AI's Response ---
-                    try:
-                        # Find the JSON part using regex, which is more robust
-                        json_match = re.search(r"```json\n(.*?)\n```", response_text, re.DOTALL)
-                        if not json_match:
-                            # Fallback if JSON is not found in the expected format
-                            st.error("Could not parse the analysis scores. Displaying raw feedback.")
-                            st.markdown(response_text)
+                    json_match = re.search(r"```json\n(.*?)\n```", response_text, re.DOTALL)
+                    if not json_match:
+                        st.error("Error: Could not parse the AI's response. The format was unexpected.")
+                        st.code(response_text) # Show the raw response for debugging
+                    else:
+                        json_str = json_match.group(1)
+                        data = json.loads(json_str)
+                        
+                        scores = data.get("scores", {})
+                        skills = data.get("skill_analysis", {})
+                        feedback = data.get("qualitative_feedback", {})
+
+                        # --- Displaying the Dashboard ---
+                        st.sidebar.header("📊 Evaluation Scorecard")
+                        for title, score in scores.items():
+                            # Reformat title from "Clarity_and_Formatting" to "Clarity and Formatting"
+                            formatted_title = title.replace('_', ' ').title()
+                            display_score_bar(score, formatted_title)
+                        
+                        st.header("Visual Analysis")
+
+                        # Display Skill Gap Chart only if job description is provided
+                        if job_desc and skills.get("job_description_keywords"):
+                            fig = create_skill_gap_chart(skills.get("resume_keywords", []), skills.get("job_description_keywords", []))
+                            if fig:
+                                st.plotly_chart(fig, use_container_width=True)
                         else:
-                            json_str = json_match.group(1)
-                            scores = json.loads(json_str)
+                            st.info("Provide a job description to generate a Skill Gap Analysis chart.")
+                        
+                        st.divider()
+                        st.header("Detailed Feedback")
+                        
+                        tab1, tab2, tab_ats = st.tabs(["💡 Areas for Improvement", "✅ Key Strengths", "🤖 ATS Optimization"])
 
-                            # The rest of the text is the qualitative feedback
-                            qualitative_feedback = response_text[json_match.end():].strip()
-
-                            # --- Displaying the Structured Output ---
-                            st.divider()
-                            st.header("Your Evaluation Scorecard")
-
-                            # Display Metrics
-                            c1, c2, c3, c4 = st.columns(4)
-                            with c1:
-                                st.metric("Clarity & Formatting", f"{scores.get('Clarity_and_Formatting', 0)}/10")
-                            with c2:
-                                st.metric("Impact & Achievements", f"{scores.get('Impact_and_Achievements', 0)}/10")
-                            with c3:
-                                st.metric("ATS Friendliness", f"{scores.get('ATS_Friendliness', 0)}/10")
-                            with c4:
-                                st.metric("Job Fit Score", f"{scores.get('Job_Fit', 0)}/10", help="How well the resume matches the job description.")
-                            
-                            st.divider()
-                            st.header("Detailed Feedback")
-                            
-                            # Split feedback into sections based on our defined headers
-                            sections = qualitative_feedback.split('###')
-                            feedback_dict = {}
-                            for section in sections:
-                                if section.strip():
-                                    parts = section.split('\n', 1)
-                                    title = parts[0].strip()
-                                    content = parts[1].strip() if len(parts) > 1 else ""
-                                    feedback_dict[title] = content
-                            
-                            tab1, tab2, tab3 = st.tabs(["💡 Areas for Improvement", "✅ Key Strengths", "🤖 ATS & Keyword Optimization"])
-
-                            with tab1:
-                                st.markdown(feedback_dict.get('💡 Areas for Improvement', "No specific improvement areas identified."))
-                            
-                            with tab2:
-                                st.markdown(feedback_dict.get('✅ Key Strengths', "No specific strengths identified."))
+                        with tab1:
+                            st.markdown(feedback.get('improvements', "No specific improvement areas identified."))
+                        with tab2:
+                            st.markdown(feedback.get('strengths', "No specific strengths identified."))
+                        with tab_ats:
+                            st.markdown(feedback.get('ats_optimization', "No specific ATS tips identified."))
                                 
-                            with tab3:
-                                st.markdown(feedback_dict.get('🤖 ATS & Keyword Optimization', "No specific ATS tips identified."))
-                                
-                    except (json.JSONDecodeError, IndexError, KeyError) as e:
-                        st.error(f"Error parsing the AI's response. Displaying the full response instead. Details: {e}")
-                        st.markdown("---")
-                        st.markdown(response_text)
-
+            except json.JSONDecodeError as e:
+                st.error(f"Error decoding the AI's JSON response: {e}")
+                st.code(response_text) # Show the raw response for debugging
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
